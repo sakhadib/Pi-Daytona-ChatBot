@@ -84,7 +84,7 @@ Usually set:
 
 Optional:
 
-- `DAYTONA_SNAPSHOT`: use only when the Daytona account/target has an available Linux VM snapshot.
+- `DAYTONA_SNAPSHOT`: use only when the Daytona account/target has an available snapshot-backed runtime.
 - `JINA_API_KEY`: use only for higher Jina web search/fetch limits.
 
 Convex may also generate local deployment values such as `CONVEX_DEPLOYMENT`; those are Convex project metadata, not app-specific secrets.
@@ -102,7 +102,7 @@ npx convex env set MODEL_ID "your-openrouter-model-id"
 Optional:
 
 ```bash
-npx convex env set DAYTONA_SNAPSHOT "your-linux-vm-snapshot"
+npx convex env set DAYTONA_SNAPSHOT "your-daytona-snapshot"
 npx convex env set JINA_API_KEY "your-jina-key"
 ```
 
@@ -121,6 +121,7 @@ nvm use 22
 Install dependencies:
 
 ```bash
+cd pi-daytona-chat
 npm install
 ```
 
@@ -166,16 +167,9 @@ Current status:
 The implementation supports two Daytona runtime paths:
 
 - Default free-account path: `daytona.create({ language: "typescript", ... })`.
-- Strict VM path: set `DAYTONA_SNAPSHOT` to an available Linux VM snapshot.
+- Snapshot-backed path: set `DAYTONA_SNAPSHOT` to an available Daytona snapshot for the configured account/target.
 
-The tested Daytona account could list VM snapshots but could not instantiate the shared Linux VM snapshots in the available targets. For example:
-
-```text
-Snapshot daytona-vm-small is not available in region us
-Snapshot daytona-vm-small is not available in region eu
-```
-
-For that reason, the default path keeps the app runnable on the free Daytona account while preserving the core architecture: one isolated Daytona environment per conversation, with Pi and tools running inside Daytona.
+The tested Daytona account could list snapshots but could not instantiate the shared snapshot tried in the available targets. For that reason, the default path keeps the app runnable on the free Daytona account while preserving the core architecture: one isolated Daytona sandbox/session per conversation, with Pi and tools running inside Daytona.
 
 ## Tradeoffs
 
@@ -187,13 +181,13 @@ For that reason, the default path keeps the app runnable on the free Daytona acc
 ## Repository Map
 
 ```text
-src/App.tsx              React chat UI and artifact drawer
-src/App.css              App layout and component styling
-src/index.css            Global CSS and viewport locking
-convex/schema.ts         Convex tables
-convex/daytona.ts        Daytona lifecycle actions
-convex/daytonaClient.ts  Daytona client, env, bootstrap, artifact scan
-convex/agent.ts          Runs Pi turn inside Daytona and persists events
-convex/runtimeSource.ts  Runtime files uploaded to Daytona
-convex/artifacts.ts      Artifact scan/download actions
+pi-daytona-chat/src/App.tsx              React chat UI and artifact drawer
+pi-daytona-chat/src/App.css              App layout and component styling
+pi-daytona-chat/src/index.css            Global CSS and viewport locking
+pi-daytona-chat/convex/schema.ts         Convex tables
+pi-daytona-chat/convex/daytona.ts        Daytona lifecycle actions
+pi-daytona-chat/convex/daytonaClient.ts  Daytona client, env, bootstrap, artifact scan
+pi-daytona-chat/convex/agent.ts          Runs Pi turn inside Daytona and persists events
+pi-daytona-chat/convex/runtimeSource.ts  Runtime files uploaded to Daytona
+pi-daytona-chat/convex/artifacts.ts      Artifact scan/download actions
 ```
