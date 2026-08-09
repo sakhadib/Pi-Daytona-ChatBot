@@ -1,6 +1,6 @@
 # Pi Daytona Chat
 
-Minimal TypeScript chatbot for the Agentic Institute systems design assessment.
+Minimal TypeScript chatbot for the systems design assessment.
 
 The system uses React for the UI, Convex for backend/database state, Daytona for isolated per-thread compute, and Pi Agent running inside each Daytona environment. OpenRouter is the LLM provider through `OPENROUTER_API_KEY` and `MODEL_ID`.
 
