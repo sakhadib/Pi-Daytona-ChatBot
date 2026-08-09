@@ -1,107 +1,54 @@
 # Pi Daytona Chat
 
-Minimal TypeScript chatbot system for the Agentic Institute systems design assessment.
+Minimal TypeScript chatbot for the Agentic Institute systems design assessment.
 
-The app demonstrates a control-plane UI/backend that creates one isolated Daytona environment per conversation, bootstraps a Pi Agent runtime inside that environment, sends chat turns into it, and stores message/tool/session history in Convex.
+The system uses React for the UI, Convex for backend/database state, Daytona for isolated per-thread compute, and Pi Agent running inside each Daytona environment. OpenRouter is the LLM provider through `OPENROUTER_API_KEY` and `MODEL_ID`.
 
-## Task Compliance Checklist
+## Requirement Status
 
-- [x] TypeScript implementation.
-- [x] React chat UI with no authentication.
-- [x] Start a new conversation/thread from the UI.
-- [x] Send user messages and receive assistant messages.
-- [x] Progressive assistant updates are persisted where Pi emits deltas.
-- [x] Each conversation creates its own dedicated Daytona session.
-- [x] Daytona session ID and runtime state are stored per thread.
-- [x] Pi Agent runtime is bootstrapped inside the Daytona environment.
-- [x] Chat turns execute by running `node run-turn.mjs` inside the thread's Daytona environment.
-- [x] Control plane is separate from execution plane.
-- [x] Convex handles database, backend API logic, and Daytona orchestration.
-- [x] Message history is stored in Convex.
-- [x] Tool execution history is stored in Convex.
-- [x] Tool execution order is stored by sequence.
-- [x] Tool names, inputs, outputs, and statuses are observable in the UI.
-- [x] Session-to-thread mapping is stored in Convex.
-- [x] Required tool allowlist is passed to Pi: `bash`, `read`, `write`, `edit`, `grep`, `glob`, `webfetch`, `websearch`.
-- [x] `glob`, `webfetch`, and `websearch` are added through a Pi extension inside Daytona.
-- [x] Tool outputs are handled as structured Pi events and persisted.
-- [x] Streaming/event timeline is stored in `streamEvents`.
-- [x] Generated artifacts are detected inside Daytona and attached to the assistant turn that created them.
-- [x] Artifacts can be downloaded from the response and from the right artifact drawer.
-- [x] Conversation rename and delete are supported.
-- [x] No authentication or user management.
-- [x] All required env variables are documented below.
-- [x] Build passes with Node 22.
-- [x] Lint passes, with only Convex generated-file warnings.
-- [ ] Cap demo link is not part of this repository and must be recorded/submitted separately.
+- [x] TypeScript app.
+- [x] Basic chat UI with no authentication.
+- [x] Start conversations and send/receive messages.
+- [x] One Daytona session is created per conversation thread.
+- [x] Pi runtime is installed and executed inside Daytona.
+- [x] Convex stores conversations, messages, tool logs, session mappings, stream events, and artifacts.
+- [x] Tool observability includes tool name, input, output, status, and execution order.
+- [x] Required tools are exposed to Pi: `bash`, `read`, `write`, `edit`, `grep`, `glob`, `webfetch`, `websearch`.
+- [x] Generated files are attached to the assistant response that created them and can be downloaded.
+- [x] Local setup, architecture, tradeoffs, and env variables are documented here.
 
-Important Daytona note: the implementation supports strict VM mode when `DAYTONA_SNAPSHOT` is set to an available Linux VM snapshot. For the tested free Daytona account, shared Linux VM snapshots were not instantiable in the available targets, so the default path uses Daytona's TypeScript sandbox/session API. The architectural boundary remains the same: one isolated Daytona environment per conversation, with Pi and tools running inside that environment.
+## Architecture Decisions
 
-## Architecture
+The app is split into two planes:
 
-There are two planes.
+- **Control plane:** React UI plus Convex queries, mutations, actions, and database tables.
+- **Execution plane:** a dedicated Daytona environment for each conversation, containing the Pi runtime and tool execution context.
 
-Control plane:
+Convex is the source of truth for application state. Daytona is the execution boundary. The browser never runs agent tools, and Convex does not directly perform user-requested filesystem or shell work; it only provisions Daytona, sends turns into Daytona, and persists the structured events returned by Pi.
 
-- React UI.
-- Convex database.
-- Convex queries, mutations, and Node actions.
-- Daytona SDK calls for session lifecycle and command execution.
+Each conversation maps to exactly one Daytona session. The session ID is stored on the `threads` row and in the `sessions` table. This keeps conversation history, filesystem state, and generated artifacts isolated by thread.
 
-Execution plane:
+## How Components Interact
 
-- One Daytona environment per conversation thread.
-- Bootstrapped runtime under `workspace/agent-runtime`.
-- Pi Agent process running inside that Daytona environment.
-- Tool execution inside Daytona, not in the browser or directly in Convex.
+1. The UI calls `api.daytona.createThreadSession`.
+2. Convex creates a `threads` row, calls Daytona, uploads the runtime from `convex/runtimeSource.ts`, installs dependencies, and verifies Pi.
+3. The user sends a message through the UI.
+4. Convex stores the user message and creates a streaming assistant placeholder.
+5. Convex runs `node run-turn.mjs <payload>` inside that thread's Daytona session.
+6. The Daytona runtime starts Pi with OpenRouter credentials and the required tool allowlist.
+7. Pi emits JSON events for message deltas and tool execution.
+8. Convex parses those events into `messages`, `toolCalls`, and `streamEvents`.
+9. Convex scans the Daytona workspace before/after the turn and records new or changed files in `artifacts`.
+10. The UI subscribes to Convex and renders messages, work details, and artifact download cards.
 
-Turn flow:
-
-1. User creates a new conversation.
-2. Convex creates a `threads` row with `creating` status.
-3. Convex calls Daytona and creates one environment for that thread.
-4. Convex uploads the runtime files from `convex/runtimeSource.ts`.
-5. Daytona installs runtime dependencies and verifies Pi.
-6. Thread becomes `ready`.
-7. User sends a message.
-8. Convex stores the user message and creates an assistant placeholder.
-9. Convex executes `node run-turn.mjs <payload>` inside that thread's Daytona environment.
-10. Pi runs with OpenRouter credentials and the required tool allowlist.
-11. Pi JSON events are parsed and persisted into messages, tool calls, and stream events.
-12. New or changed files in Daytona are detected and stored as artifacts for that turn.
-
-## Data Model
-
-Convex tables:
+## Data Stored In Convex
 
 - `threads`: conversation title, status, Daytona session ID/name, runtime status, errors.
-- `messages`: user and assistant messages, streaming status, turn IDs.
-- `sessions`: Daytona session metadata, runtime type, region, bootstrap state.
-- `toolCalls`: tool name, input, output, status, execution sequence, timestamps.
+- `sessions`: Daytona session metadata and bootstrap status.
+- `messages`: user/assistant messages and turn IDs.
+- `toolCalls`: tool name, input, output, status, execution order, timestamps.
 - `streamEvents`: assistant deltas, tool events, status updates, errors.
-- `artifacts`: generated file metadata attached to `threadId` and `turnId`.
-
-## Repository Layout
-
-```text
-src/
-  App.tsx              React UI, chat timeline, sidebar, artifact drawer
-  App.css              Light-mode app styling and pane layout
-  index.css            Global variables and viewport locking
-
-convex/
-  schema.ts            Convex tables and indexes
-  daytona.ts           Daytona session lifecycle actions
-  daytonaClient.ts     Daytona SDK client, runtime env, bootstrap, artifact scan
-  agent.ts             Run one Pi turn inside Daytona and persist events
-  runtimeSource.ts     Files uploaded into Daytona runtime
-  messages.ts          Message queries/internal mutations
-  toolCalls.ts         Tool log queries/internal mutations
-  streamEvents.ts      Event log queries/internal mutations
-  sessions.ts          Daytona session metadata
-  artifactRecords.ts   Artifact record query/internal mutation
-  artifacts.ts         Artifact scan/download actions
-```
+- `artifacts`: generated file metadata linked to `threadId` and `turnId`.
 
 ## Environment Variables
 
@@ -125,10 +72,10 @@ JINA_API_KEY=
 
 Required:
 
+- `VITE_CONVEX_URL`
 - `DAYTONA_API_KEY`
 - `OPENROUTER_API_KEY`
 - `MODEL_ID`
-- `VITE_CONVEX_URL`
 
 Usually set:
 
@@ -137,10 +84,12 @@ Usually set:
 
 Optional:
 
-- `DAYTONA_SNAPSHOT`: set this only when your Daytona account/target can create the named Linux VM snapshot.
-- `JINA_API_KEY`: only needed for higher web search/fetch limits.
+- `DAYTONA_SNAPSHOT`: use only when the Daytona account/target has an available Linux VM snapshot.
+- `JINA_API_KEY`: use only for higher Jina web search/fetch limits.
 
-Set Convex env vars:
+Convex may also generate local deployment values such as `CONVEX_DEPLOYMENT`; those are Convex project metadata, not app-specific secrets.
+
+Set backend variables with:
 
 ```bash
 npx convex env set DAYTONA_API_KEY "your-daytona-api-key"
@@ -157,18 +106,16 @@ npx convex env set DAYTONA_SNAPSHOT "your-linux-vm-snapshot"
 npx convex env set JINA_API_KEY "your-jina-key"
 ```
 
-Do not set optional variables to empty strings. Leave them unset when unused.
+Do not set optional variables to empty strings.
 
 ## Local Setup
 
-Use Node 22. On Pop!_OS or Ubuntu with `nvm`:
+Use Node 22:
 
 ```bash
 source "$HOME/.nvm/nvm.sh"
 nvm install 22
 nvm use 22
-node -v
-npm -v
 ```
 
 Install dependencies:
@@ -177,25 +124,19 @@ Install dependencies:
 npm install
 ```
 
-Create or update `.env.local`:
-
-```bash
-printf 'VITE_CONVEX_URL=your-convex-url\n' > .env.local
-```
-
 Generate Convex bindings:
 
 ```bash
 npx convex codegen
 ```
 
-Run Convex locally:
+Run Convex:
 
 ```bash
 npx convex dev
 ```
 
-In another terminal, run Vite:
+Run Vite in another terminal:
 
 ```bash
 source "$HOME/.nvm/nvm.sh"
@@ -203,17 +144,9 @@ nvm use 22
 npm run dev
 ```
 
-Open the local URL printed by Vite, usually:
+Open the local URL printed by Vite, usually `http://127.0.0.1:5173/`.
 
-```text
-http://127.0.0.1:5173/
-```
-
-If that port is already in use, Vite will choose another port.
-
-## Verification Commands
-
-Run these before submitting:
+## Verification
 
 ```bash
 source "$HOME/.nvm/nvm.sh"
@@ -223,63 +156,44 @@ npm run build
 npm run lint
 ```
 
-Expected result:
+Current status:
 
 - `npm run build` passes.
-- `npm run lint` passes, but may print warnings from Convex generated files such as unused `eslint-disable` directives.
+- `npm run lint` passes with only Convex generated-file warnings about unused `eslint-disable` directives.
 
-## Daytona Runtime Modes
+## Daytona Runtime Note
 
-Default mode:
+The implementation supports two Daytona runtime paths:
 
-- Uses `daytona.create({ language: "typescript", ... })`.
-- Works with the tested free Daytona account.
-- Still creates one isolated Daytona session per thread.
+- Default free-account path: `daytona.create({ language: "typescript", ... })`.
+- Strict VM path: set `DAYTONA_SNAPSHOT` to an available Linux VM snapshot.
 
-Strict VM mode:
-
-- Set `DAYTONA_SNAPSHOT` to an available Linux VM snapshot.
-- The same runtime bootstrap and turn execution flow is used.
-- This is the mode to use if the evaluator requires Daytona VM terminology literally.
-
-Tested VM limitation on the current Daytona account:
+The tested Daytona account could list VM snapshots but could not instantiate the shared Linux VM snapshots in the available targets. For example:
 
 ```text
 Snapshot daytona-vm-small is not available in region us
 Snapshot daytona-vm-small is not available in region eu
 ```
 
-Because of that account limitation, the repository keeps the free-account sandbox path as the default so the assessment app remains runnable.
-
-## UI Notes
-
-The UI is intentionally a consumer-facing light-mode chat app:
-
-- Left sidebar lists conversations and supports rename/delete.
-- Main chat pane renders markdown assistant responses.
-- Work details are collapsible and auto-collapse when the assistant response completes.
-- Tool details are shown as readable progress summaries instead of raw JSON blocks.
-- Composer is fixed to the visible viewport bottom with a blur scrim behind it.
-- Right artifact drawer lists all artifacts and supports individual or bulk download.
-- Artifact cards remain attached to the assistant response that generated them.
-- Error messages appear as dismissible auto-expiring toasts.
-- Left sidebar, main chat, and right artifact drawer scroll independently.
+For that reason, the default path keeps the app runnable on the free Daytona account while preserving the core architecture: one isolated Daytona environment per conversation, with Pi and tools running inside Daytona.
 
 ## Tradeoffs
 
-- Daytona command execution currently persists Pi JSON events after the Daytona command returns. The data model already separates `messages`, `toolCalls`, and `streamEvents`, so a future SDK streaming API can be connected without redesigning storage.
-- Conversation history is authoritative in Convex and sent to Pi on each turn. Daytona also keeps the per-thread filesystem and Pi session files.
-- Web search uses a small Pi extension backed by Jina search. Add `JINA_API_KEY` only if unauthenticated limits are not enough.
-- Authentication, user management, quota controls, and production hardening are intentionally omitted because they are non-goals in `Task.md`.
+- Daytona command output is persisted after command completion on the SDK path used here. Pi still emits structured JSON events, so the Convex model can support a lower-latency streaming API later without schema changes.
+- Convex stores authoritative chat/tool/session history; Daytona stores per-thread filesystem and Pi runtime state.
+- `glob`, `webfetch`, and `websearch` are implemented as a small Pi extension inside Daytona instead of adding another external service layer.
+- The UI includes more polish than the non-goals require, but authentication, user management, quota controls, and production hardening are intentionally omitted.
 
-## Demo Checklist
+## Repository Map
 
-For the Cap demo, show:
-
-1. Create a new conversation.
-2. Confirm a Daytona session appears in the header.
-3. Ask the agent to create a file, for example a PDF/report/script.
-4. Open Work details and show tool execution history.
-5. Download the generated artifact from the assistant response.
-6. Open the right artifact drawer and download from there.
-7. Rename and delete a conversation from the left sidebar.
+```text
+src/App.tsx              React chat UI and artifact drawer
+src/App.css              App layout and component styling
+src/index.css            Global CSS and viewport locking
+convex/schema.ts         Convex tables
+convex/daytona.ts        Daytona lifecycle actions
+convex/daytonaClient.ts  Daytona client, env, bootstrap, artifact scan
+convex/agent.ts          Runs Pi turn inside Daytona and persists events
+convex/runtimeSource.ts  Runtime files uploaded to Daytona
+convex/artifacts.ts      Artifact scan/download actions
+```
